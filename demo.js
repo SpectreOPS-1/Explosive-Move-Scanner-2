@@ -1,6 +1,6 @@
 // Demo data provider: deterministic, synthetic, clearly NOT market data.
 // Same symbol -> same history every time, so the demo is repeatable.
-import { isMarketOpen, etDateKey } from './indicators.js';
+import { isMarketOpen, etDateKey, relativeVolume } from './indicators.js';
 
 function hash(str) {
   let h = 2166136261;
@@ -130,6 +130,20 @@ export function createDemoProvider() {
       const key = list === 'actives' ? (r) => r.volume : list === 'losers' ? (r) => -r.changePct : (r) => r.changePct;
       const items = rows.filter((r) => r.price >= minPrice).sort((a, b) => key(b) - key(a)).slice(0, top);
       return { list, items, lastUpdated: new Date().toISOString(), filters: { minPrice, hideDerivatives: true, top }, demo: true };
+    },
+    async fetchLowRvol({ minRvol = 2, top = 20, minPrice = 1 } = {}) {
+      // Demo data has no long history, so the 200-day-low test cannot be shown; this lists demo names at the RVOL bar.
+      const items = [];
+      for (const symbol of Object.keys(PROFILES)) {
+        const { bars } = buildBars(symbol, new Date());
+        const last = bars[bars.length - 1], prev = bars[bars.length - 2];
+        const rv = relativeVolume(bars, { timeAdjust: false });
+        if (rv.ratio != null && rv.ratio >= minRvol && last.c >= minPrice) {
+          items.push({ symbol, price: Number(last.c.toFixed(2)), changePct: ((last.c - prev.c) / prev.c) * 100, volume: null, trades: null, rvol: rv.ratio, lowDate: null, lowSessionsAgo: null, pctAboveLow: null });
+        }
+      }
+      items.sort((a, b) => b.rvol - a.rvol);
+      return { list: 'lows', items: items.slice(0, top), lastUpdated: new Date().toISOString(), filters: {}, demo: true, stats: { universe: Object.keys(PROFILES).length, lowHits: null, measured: null, passed: items.length } };
     },
     async fetchNews(symbol) {
       return [

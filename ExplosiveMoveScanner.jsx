@@ -65,7 +65,7 @@ function SortHeader({ label, k, sort, setSort, className = '' }) {
 export default function ExplosiveMoveScanner() {
   const [apiUrl, setApiUrl] = useState(() => read('localStorage', 'ems.apiUrl', ''));
   const [accessCode, setAccessCode] = useState(() => read('sessionStorage', 'ems.code', ''));
-  const [movers, setMovers] = useState({ list: 'gainers', minPrice: '1', hideDerivatives: true, loading: false, error: null, data: null });
+  const [movers, setMovers] = useState({ list: 'gainers', minPrice: '1', minRvol: '2', hideDerivatives: true, loading: false, error: null, data: null, progress: '' });
   const [showKey, setShowKey] = useState(false);
   const [watchlist, setWatchlist] = useState(() => read('localStorage', 'ems.watchlist', DEFAULT_WATCHLIST));
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...read('localStorage', 'ems.filters', {}) }));
@@ -160,10 +160,20 @@ export default function ExplosiveMoveScanner() {
     setMovers({ ...m, loading: true, error: null });
     try {
       const mp = Number(m.minPrice);
-      const data = await provider.fetchMovers({ list: m.list, top: 20, minPrice: Number.isFinite(mp) && m.minPrice !== '' ? mp : 1, hideDerivatives: m.hideDerivatives });
-      setMovers({ ...m, loading: false, error: null, data });
+      const minPrice = Number.isFinite(mp) && m.minPrice !== '' ? mp : 1;
+      let data;
+      if (m.list === 'lows') {
+        const rv = Number(m.minRvol);
+        data = await provider.fetchLowRvol(
+          { minRvol: Number.isFinite(rv) && m.minRvol !== '' ? rv : 2, withinDays: 30, top: 20, minPrice, hideDerivatives: m.hideDerivatives },
+          { onProgress: (progress) => setMovers((cur) => ({ ...cur, progress })) },
+        );
+      } else {
+        data = await provider.fetchMovers({ list: m.list, top: 20, minPrice, hideDerivatives: m.hideDerivatives });
+      }
+      setMovers({ ...m, loading: false, error: null, data, progress: '' });
     } catch (e) {
-      setMovers({ ...m, loading: false, error: e.message });
+      setMovers({ ...m, loading: false, error: e.message, progress: '' });
     }
   };
   const moverSymbols = movers.data?.items?.map((i) => i.symbol) || [];
@@ -248,7 +258,7 @@ export default function ExplosiveMoveScanner() {
         <section className="space-y-3" aria-labelledby="movers-h">
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="movers-h" className="text-lg font-semibold mr-2 flex items-center gap-2"><Flame className="w-5 h-5 text-orange-400" />Today's top movers</h2>
-            {[['gainers', 'Top gainers'], ['actives', 'Most active'], ['losers', 'Top losers']].map(([k, label]) => (
+            {[['gainers', 'Top gainers'], ['actives', 'Most active'], ['lows', '200-day lows + RVOL']].map(([k, label]) => (
               <button key={k} type="button" aria-pressed={movers.list === k} onClick={() => loadMovers({ list: k })} className={`px-3 py-1 text-sm rounded-full border ${movers.list === k ? 'bg-blue-600 border-blue-500' : 'bg-slate-800 border-slate-600 hover:border-blue-500'}`}>{label}</button>
             ))}
             <button type="button" onClick={() => loadMovers()} disabled={movers.loading} className="px-3 py-1 text-sm rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50 flex items-center gap-1"><RefreshCw className={`w-3.5 h-3.5 ${movers.loading ? 'animate-spin' : ''}`} />{movers.data ? 'Refresh' : 'Fetch top 20'}</button>
@@ -257,11 +267,24 @@ export default function ExplosiveMoveScanner() {
             <label className="flex items-center gap-2">Min price ($)
               <input type="number" step="any" inputMode="decimal" value={movers.minPrice} onChange={(e) => setMovers((m) => ({ ...m, minPrice: e.target.value }))} className={inputCls + ' !w-20'} />
             </label>
+            {movers.list === 'lows' && (
+              <label className="flex items-center gap-2">RVOL at least (x)
+                <input type="number" step="any" inputMode="decimal" value={movers.minRvol} onChange={(e) => setMovers((m) => ({ ...m, minRvol: e.target.value }))} className={inputCls + ' !w-20'} />
+              </label>
+            )}
             <label className="flex items-center gap-2"><input type="checkbox" checked={movers.hideDerivatives} onChange={(e) => setMovers((m) => ({ ...m, hideDerivatives: e.target.checked }))} />Hide warrants, rights and units</label>
             <span className="text-xs text-slate-500">Press Refresh after changing these.</span>
           </div>
           {movers.error && <div role="alert" className="flex gap-2 rounded border border-red-700 bg-red-950 px-4 py-2 text-sm text-red-200"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />{movers.error}</div>}
-          {movers.data && !movers.data.items.length && <p className="text-sm text-slate-400">No movers match these filters right now.</p>}
+          {movers.loading && movers.progress && <p role="status" aria-live="polite" className="text-sm text-slate-300">{movers.progress}</p>}
+          {movers.list === 'lows' && movers.data?.list === 'lows' && !movers.loading && (
+            <p className="text-xs text-slate-400">
+              {movers.data.demo
+                ? 'Demo mode: the 200-day-low test needs live data, so this just lists demo names above the RVOL bar.'
+                : `Checked ${movers.data.stats.universe} active names · ${movers.data.stats.lowHits} set a 200-day low in the last 30 days · ${movers.data.stats.passed} also have RVOL of ${movers.data.filters.minRvol}x or more${movers.data.stats.capped ? ' (RVOL was measured on the 60 freshest lows only)' : ''}.`}
+            </p>
+          )}
+          {movers.data && !movers.data.items.length && !movers.loading && <p className="text-sm text-slate-400">{movers.data.list === 'lows' ? 'No stocks meet both tests right now. That is a normal result, not an error.' : 'No movers match these filters right now.'}</p>}
           {movers.data?.items?.length > 0 && (
             <>
               <ul className="flex flex-wrap gap-2" aria-label="Fetched movers">
@@ -271,6 +294,8 @@ export default function ExplosiveMoveScanner() {
                     <span className="text-slate-400 tabular-nums">{fmtPrice(i.price)}</span>{' '}
                     <span className={`tabular-nums ${i.changePct == null ? 'text-slate-500' : i.changePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtPct(i.changePct)}</span>
                     {i.volume != null && <span className="text-slate-500"> · {fmtVolume(i.volume)}</span>}
+                    {i.rvol != null && <span className="text-emerald-300 tabular-nums"> · {i.rvol.toFixed(1)}x RVOL</span>}
+                    {i.lowSessionsAgo != null && <span className="text-slate-500"> · low {i.lowSessionsAgo === 0 ? 'today' : `${i.lowSessionsAgo} sessions ago`}</span>}
                   </li>
                 ))}
               </ul>

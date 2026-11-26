@@ -38,6 +38,47 @@ export function createApiProvider({ baseUrl, accessCode }) {
       return get('/api/movers', { list, top, minPrice, hideDerivatives: hideDerivatives ? 1 : 0 }, signal);
     },
 
+    /**
+     * Stocks that set a 200-day low in the last `withinDays` days AND trade at `minRvol` or higher right now.
+     * Starts from today's most active names + biggest movers, narrows by the 200-day-low test (cheap, daily bars),
+     * then measures time-of-day RVOL only on the survivors.
+     */
+    async fetchLowRvol({ minRvol = 2, withinDays = 30, top = 20, minPrice = 1, hideDerivatives = true }, { signal, onProgress } = {}) {
+      onProgress?.("Collecting today's most active names…");
+      const uni = await get('/api/universe', { hideDerivatives: hideDerivatives ? 1 : 0 }, signal);
+      const universe = uni.symbols || [];
+      const hits = [];
+      for (let i = 0; i < universe.length; i += 100) {
+        onProgress?.(`Checking 200-day lows… ${Math.min(i + 100, universe.length)} of ${universe.length}`);
+        const r = await get('/api/lows', { symbols: universe.slice(i, i + 100).join(','), within: withinDays, minPrice }, signal);
+        hits.push(...r.hits);
+      }
+      // Most recent lows first; cap the RVOL stage so one click stays quick.
+      hits.sort((a, b) => a.sessionsAgo - b.sessionsAgo || a.pctAboveLow - b.pctAboveLow);
+      const CAP = 60;
+      const candidates = hits.slice(0, CAP);
+      const byLow = new Map(candidates.map((h) => [h.symbol, h]));
+      const passed = [];
+      for (let i = 0; i < candidates.length; i += 5) {
+        onProgress?.(`Measuring relative volume… ${Math.min(i + 5, candidates.length)} of ${candidates.length}`);
+        const { snapshots } = await get('/api/scan', { symbols: candidates.slice(i, i + 5).map((h) => h.symbol).join(',') }, signal);
+        for (const sn of snapshots) {
+          if (sn.error || !sn.rvol || sn.rvol.ratio < minRvol) continue;
+          const low = byLow.get(sn.symbol);
+          passed.push({
+            symbol: sn.symbol, price: sn.price, changePct: sn.changePct, volume: null, trades: null,
+            rvol: sn.rvol.ratio, lowDate: low.lastHitDate, lowSessionsAgo: low.sessionsAgo, pctAboveLow: low.pctAboveLow,
+          });
+        }
+      }
+      passed.sort((a, b) => b.rvol - a.rvol);
+      return {
+        list: 'lows', items: passed.slice(0, top), lastUpdated: uni.lastUpdated || null,
+        filters: { minRvol, withinDays, minPrice, hideDerivatives, top },
+        stats: { universe: universe.length, lowHits: hits.length, measured: candidates.length, passed: passed.length, capped: hits.length > CAP },
+      };
+    },
+
     async fetchNews(symbol, { signal } = {}) {
       const d = await get('/api/news', { symbol }, signal);
       return d.items || [];
