@@ -145,6 +145,11 @@ export function createDemoProvider() {
       items.sort((a, b) => b.rvol - a.rvol);
       return { list: 'lows', items: items.slice(0, top), lastUpdated: new Date().toISOString(), filters: {}, demo: true, stats: { universe: Object.keys(PROFILES).length, lowHits: null, measured: null, passed: items.length } };
     },
+    async fetchBacktest() {
+      const err = new Error('The backtest needs live market history. Connect your Worker first (Data source box).');
+      err.code = 'demo';
+      throw err;
+    },
     async fetchNews(symbol) {
       return [
         { headline: `Demo headline: ${symbol} volume picks up (not real news)`, url: `https://finance.yahoo.com/quote/${symbol}`, source: 'Demo', datetime: Math.floor(Date.now() / 1000) },
