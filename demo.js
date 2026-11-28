@@ -145,6 +145,10 @@ export function createDemoProvider() {
       items.sort((a, b) => b.rvol - a.rvol);
       return { list: 'lows', items: items.slice(0, top), lastUpdated: new Date().toISOString(), filters: {}, demo: true, stats: { universe: Object.keys(PROFILES).length, lowHits: null, measured: null, passed: items.length } };
     },
+    async fetchGainerLows(opts = {}) {
+      const d = await this.fetchMovers({ ...opts, list: 'gainers' });
+      return { ...d, list: 'gainerlows', stats: { gainers: d.items.length, lowHits: null } };
+    },
     async fetchBacktest() {
       const err = new Error('The backtest needs live market history. Connect your Worker first (Data source box).');
       err.code = 'demo';
@@ -157,3 +161,4 @@ export function createDemoProvider() {
     },
   };
 }
+
