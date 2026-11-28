@@ -79,6 +79,38 @@ export function createApiProvider({ baseUrl, accessCode }) {
       };
     },
 
+    /** Today's top gainers that also set a 200-day low in the last `withinDays` days, ranked by today's gain. */
+    async fetchGainerLows({ withinDays = 30, top = 20, minPrice = 1, hideDerivatives = true }, { signal, onProgress } = {}) {
+      onProgress?.('Fetching the top gainers…');
+      const mv = await get('/api/movers', { list: 'gainers', top: 50, minPrice, hideDerivatives: hideDerivatives ? 1 : 0 }, signal);
+      const gainers = mv.items || [];
+      if (!gainers.length) {
+        return { list: 'gainerlows', items: [], lastUpdated: mv.lastUpdated || null, filters: { withinDays, top, minPrice }, stats: { gainers: 0, lowHits: 0 } };
+      }
+      onProgress?.(`Checking ${gainers.length} gainers for 200-day lows…`);
+      const lows = await get('/api/lows', { symbols: gainers.map((g) => g.symbol).join(','), within: withinDays, minPrice }, signal);
+      const byLow = new Map(lows.hits.map((h) => [h.symbol, h]));
+      const hits = gainers.filter((g) => byLow.has(g.symbol)).slice(0, top);
+      // RVOL is shown for context only; it is not a filter on this tab.
+      const rvol = new Map();
+      for (let i = 0; i < hits.length; i += 5) {
+        onProgress?.(`Measuring relative volume… ${Math.min(i + 5, hits.length)} of ${hits.length}`);
+        try {
+          const { snapshots } = await get('/api/scan', { symbols: hits.slice(i, i + 5).map((h) => h.symbol).join(',') }, signal);
+          for (const sn of snapshots) if (!sn.error && sn.rvol) rvol.set(sn.symbol, sn.rvol.ratio);
+        } catch (e) { if (e.name === 'AbortError') throw e; }
+      }
+      const items = hits.map((g) => {
+        const low = byLow.get(g.symbol);
+        return { symbol: g.symbol, price: g.price, changePct: g.changePct, volume: null, trades: null,
+          rvol: rvol.get(g.symbol) ?? null, lowDate: low.lastHitDate, lowSessionsAgo: low.sessionsAgo, pctAboveLow: low.pctAboveLow };
+      });
+      return {
+        list: 'gainerlows', items, lastUpdated: mv.lastUpdated || null, filters: { withinDays, top, minPrice },
+        stats: { gainers: gainers.length, lowHits: lows.hits.length },
+      };
+    },
+
     /** Replays the last year of daily bars for a random sample of US stocks and counts outcomes after each setup. */
     async fetchBacktest({ sample = 300 } = {}, { signal, onProgress } = {}) {
       onProgress?.('Choosing a random sample of US-listed stocks…');
@@ -108,4 +140,3 @@ export function createApiProvider({ baseUrl, accessCode }) {
     },
   };
 }
-
