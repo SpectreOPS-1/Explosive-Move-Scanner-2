@@ -149,11 +149,6 @@ export function createDemoProvider() {
       const d = await this.fetchMovers({ ...opts, list: 'gainers' });
       return { ...d, list: 'gainerlows', stats: { gainers: d.items.length, lowHits: null } };
     },
-    async fetchBacktest() {
-      const err = new Error('The backtest needs live market history. Connect your Worker first (Data source box).');
-      err.code = 'demo';
-      throw err;
-    },
     async fetchNews(symbol) {
       return [
         { headline: `Demo headline: ${symbol} volume picks up (not real news)`, url: `https://finance.yahoo.com/quote/${symbol}`, source: 'Demo', datetime: Math.floor(Date.now() / 1000) },
