@@ -24,7 +24,7 @@ export function analyze(snapshot, { timeAdjust = true } = {}) {
   // Demo data has only daily bars, so it falls back to the daily ratio.
   const pre = snapshot.rvol;
   const rv = pre !== undefined
-    ? (pre ? { ratio: pre.ratio, today: pre.today, avg: pre.baseline, adjusted: false, mode: 'time-of-day', days: pre.days }
+    ? (pre ? { ratio: pre.ratio, today: pre.today, avg: pre.baseline, adjusted: false, mode: 'time-of-day', days: pre.days, unit: pre.unit || 'shares', shares: pre.shares || null }
            : { ratio: null, today: null, avg: null, adjusted: false, mode: 'time-of-day' })
     : { ...relativeVolume(snapshot.bars, { timeAdjust }), mode: 'daily' };
   const { score, partial, parts } = scoreStock({
@@ -41,6 +41,10 @@ export function analyze(snapshot, { timeAdjust = true } = {}) {
     baselineDays: rv.days ?? null,
     volToday: rv.today,
     volAvg: rv.avg,
+    rvolUnit: rv.unit || 'shares',
+    sharesRvol: rv.shares ? rv.shares.ratio : null,
+    sharesToday: rv.shares ? rv.shares.today : null,
+    sharesAvg: rv.shares ? rv.shares.baseline : null,
     pmo: p.value,
     pmoSignal: p.signal,
     pmoRising: p.rising,
@@ -89,3 +93,4 @@ export function toCsv(rows) {
   ].map(cell).join(','));
   return [head.join(','), ...lines].join('\n');
 }
+
