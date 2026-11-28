@@ -173,7 +173,7 @@ function SortHeader({ label, k, sort, setSort, className = '' }) {
 export default function ExplosiveMoveScanner() {
   const [apiUrl, setApiUrl] = useState(() => read('localStorage', 'ems.apiUrl', ''));
   const [accessCode, setAccessCode] = useState(() => read('sessionStorage', 'ems.code', ''));
-  const [movers, setMovers] = useState({ list: 'gainers', minPrice: '1', minRvol: '2', hideDerivatives: true, loading: false, error: null, data: null, progress: '' });
+  const [movers, setMovers] = useState({ list: 'gainers', minPrice: '1', minRvol: '2', maxChange: '10', minDollar: '250000', hideDerivatives: true, loading: false, error: null, data: null, progress: '' });
   const [showKey, setShowKey] = useState(false);
   const [watchlist, setWatchlist] = useState(() => read('localStorage', 'ems.watchlist', DEFAULT_WATCHLIST));
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...read('localStorage', 'ems.filters', {}) }));
@@ -290,7 +290,11 @@ export default function ExplosiveMoveScanner() {
       } else if (m.list === 'lows') {
         const rv = Number(m.minRvol);
         data = await provider.fetchLowRvol(
-          { minRvol: Number.isFinite(rv) && m.minRvol !== '' ? rv : 2, withinDays: 30, top: 20, minPrice, hideDerivatives: m.hideDerivatives },
+          {
+            minRvol: Number.isFinite(rv) && m.minRvol !== '' ? rv : 2, withinDays: 30, top: 20, minPrice, hideDerivatives: m.hideDerivatives,
+            maxChange: m.maxChange === '' || !Number.isFinite(Number(m.maxChange)) ? null : Number(m.maxChange),
+            minDollarVol: m.minDollar === '' || !Number.isFinite(Number(m.minDollar)) ? 0 : Number(m.minDollar),
+          },
           { onProgress: (progress) => setMovers((cur) => ({ ...cur, progress })) },
         );
       } else {
@@ -397,6 +401,16 @@ export default function ExplosiveMoveScanner() {
                 <input type="number" step="any" inputMode="decimal" value={movers.minRvol} onChange={(e) => setMovers((m) => ({ ...m, minRvol: e.target.value }))} className={inputCls + ' !w-20'} />
               </label>
             )}
+            {movers.list === 'lows' && (
+              <>
+                <label className="flex items-center gap-2" title="Leave empty to include names that already jumped">Skip names up more than (%)
+                  <input type="number" step="any" inputMode="decimal" value={movers.maxChange} onChange={(e) => setMovers((m) => ({ ...m, maxChange: e.target.value }))} placeholder="off" className={inputCls + ' !w-20'} />
+                </label>
+                <label className="flex items-center gap-2" title="Average dollars traded in a whole normal session. Set 0 or empty to include thin names">Min avg $ traded per day
+                  <input type="number" step="any" inputMode="decimal" value={movers.minDollar} onChange={(e) => setMovers((m) => ({ ...m, minDollar: e.target.value }))} placeholder="off" className={inputCls + ' !w-28'} />
+                </label>
+              </>
+            )}
             <label className="flex items-center gap-2"><input type="checkbox" checked={movers.hideDerivatives} onChange={(e) => setMovers((m) => ({ ...m, hideDerivatives: e.target.checked }))} />Hide warrants, rights and units</label>
             <span className="text-xs text-slate-500">Press Refresh after changing these.</span>
           </div>
@@ -406,7 +420,7 @@ export default function ExplosiveMoveScanner() {
             <p className="text-xs text-slate-400">
               {movers.data.demo
                 ? 'Demo mode: the 200-day-low test needs live data, so this just lists demo names above the RVOL bar.'
-                : `Checked ${movers.data.stats.universe} active names · ${movers.data.stats.lowHits} set a 200-day low in the last 30 days · ${movers.data.stats.passed} also have RVOL of ${movers.data.filters.minRvol}x or more${movers.data.stats.capped ? ' (RVOL was measured on the 60 freshest lows only)' : ''}.`}
+                : `Checked ${movers.data.stats.universe} active names · ${movers.data.stats.lowHits} set a 200-day low in the last 30 days · ${movers.data.stats.passed + movers.data.stats.popped + movers.data.stats.thin} reach RVOL of ${movers.data.filters.minRvol}x or more${movers.data.stats.popped ? ` · ${movers.data.stats.popped} of those left out for already being up ${movers.data.filters.maxChange}% or more` : ''}${movers.data.stats.thin ? ` · ${movers.data.stats.thin} left out as too thinly traded (under ${fmtDollars(movers.data.filters.minDollarVol)} a day)` : ''}${movers.data.stats.capped ? ' (RVOL was measured on the 60 freshest lows only)' : ''}.`}
             </p>
           )}
           {movers.data?.list === 'gainerlows' && !movers.loading && (
@@ -416,7 +430,7 @@ export default function ExplosiveMoveScanner() {
                 : `Checked the top ${movers.data.stats.gainers} gainers · ${movers.data.stats.lowHits} set a 200-day low in the last 30 days. Ranked by today's gain. These are already up, so you would be chasing; RVOL is shown for context only.`}
             </p>
           )}
-          {movers.data && !movers.data.items.length && !movers.loading && <p className="text-sm text-slate-400">{movers.data.list === 'gainerlows' ? 'None of the current top gainers set a 200-day low in the last 30 days. That is common and not an error.' : movers.data.list === 'lows' ? 'No stocks meet both tests right now. That is a normal result, not an error.' : 'No movers match these filters right now.'}</p>}
+          {movers.data && !movers.data.items.length && !movers.loading && <p className="text-sm text-slate-400">{movers.data.list === 'gainerlows' ? 'None of the current top gainers set a 200-day low in the last 30 days. That is common and not an error.' : movers.data.list === 'lows' ? 'No stocks pass every test right now. That is a normal result, not an error. Loosen the RVOL, price-change or liquidity boxes to see more.' : 'No movers match these filters right now.'}</p>}
           {movers.data?.items?.length > 0 && (
             <>
               <ul className="flex flex-wrap gap-2" aria-label="Fetched movers">
@@ -586,3 +600,4 @@ export default function ExplosiveMoveScanner() {
     </div>
   );
 }
+
