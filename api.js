@@ -43,7 +43,7 @@ export function createApiProvider({ baseUrl, accessCode }) {
      * Starts from today's most active names + biggest movers, narrows by the 200-day-low test (cheap, daily bars),
      * then measures time-of-day RVOL only on the survivors.
      */
-    async fetchLowRvol({ minRvol = 2, withinDays = 30, top = 20, minPrice = 1, hideDerivatives = true, maxChange = null, minDollarVol = 0 }, { signal, onProgress } = {}) {
+    async fetchLowRvol({ minRvol = 2, withinDays = 30, top = 20, minPrice = 1, hideDerivatives = true, maxChange = null, minChange = null, minDollarVol = 0 }, { signal, onProgress } = {}) {
       onProgress?.("Collecting today's most active names…");
       const uni = await get('/api/universe', { hideDerivatives: hideDerivatives ? 1 : 0 }, signal);
       const universe = uni.symbols || [];
@@ -59,7 +59,7 @@ export function createApiProvider({ baseUrl, accessCode }) {
       const candidates = hits.slice(0, CAP);
       const byLow = new Map(candidates.map((h) => [h.symbol, h]));
       const passed = [];
-      let popped = 0, thin = 0;
+      let popped = 0, crashed = 0, thin = 0;
       for (let i = 0; i < candidates.length; i += 5) {
         onProgress?.(`Measuring relative volume… ${Math.min(i + 5, candidates.length)} of ${candidates.length}`);
         const { snapshots } = await get('/api/scan', { symbols: candidates.slice(i, i + 5).map((h) => h.symbol).join(',') }, signal);
@@ -67,6 +67,7 @@ export function createApiProvider({ baseUrl, accessCode }) {
           if (sn.error || !sn.rvol || sn.rvol.ratio < minRvol) continue;
           // Early-build filters: skip names that already jumped, and names too thinly traded to act on.
           if (maxChange != null && sn.changePct != null && sn.changePct >= maxChange) { popped += 1; continue; }
+          if (minChange != null && sn.changePct != null && sn.changePct <= minChange) { crashed += 1; continue; }
           if (minDollarVol > 0 && !(sn.rvol.avgDay >= minDollarVol)) { thin += 1; continue; }
           const low = byLow.get(sn.symbol);
           passed.push({
@@ -78,8 +79,8 @@ export function createApiProvider({ baseUrl, accessCode }) {
       passed.sort((a, b) => b.rvol - a.rvol);
       return {
         list: 'lows', items: passed.slice(0, top), lastUpdated: uni.lastUpdated || null,
-        filters: { minRvol, withinDays, minPrice, hideDerivatives, top, maxChange, minDollarVol },
-        stats: { universe: universe.length, lowHits: hits.length, measured: candidates.length, passed: passed.length, capped: hits.length > CAP, popped, thin },
+        filters: { minRvol, withinDays, minPrice, hideDerivatives, top, maxChange, minChange, minDollarVol },
+        stats: { universe: universe.length, lowHits: hits.length, measured: candidates.length, passed: passed.length, capped: hits.length > CAP, popped, crashed, thin },
       };
     },
 
@@ -113,29 +114,6 @@ export function createApiProvider({ baseUrl, accessCode }) {
         list: 'gainerlows', items, lastUpdated: mv.lastUpdated || null, filters: { withinDays, top, minPrice },
         stats: { gainers: gainers.length, lowHits: lows.hits.length },
       };
-    },
-
-    /** Replays the last year of daily bars for a random sample of US stocks and counts outcomes after each setup. */
-    async fetchBacktest({ sample = 300 } = {}, { signal, onProgress } = {}) {
-      onProgress?.('Choosing a random sample of US-listed stocks…');
-      const uni = await get('/api/bt/universe', { n: sample }, signal);
-      const total = {};
-      let used = 0, params = null;
-      const chunk = 40;
-      for (let i = 0; i < uni.symbols.length; i += chunk) {
-        onProgress?.(`Replaying history… ${Math.min(i + chunk, uni.symbols.length)} of ${uni.symbols.length} stocks`);
-        const r = await get('/api/bt/run', { symbols: uni.symbols.slice(i, i + chunk).join(',') }, signal);
-        used += r.symbolsUsed;
-        for (const [name, c] of Object.entries(r.cohorts)) {
-          const t = total[name] || (total[name] = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, Array.isArray(v) ? new Array(v.length).fill(0) : 0])));
-          for (const [k, v] of Object.entries(c)) {
-            if (Array.isArray(v)) v.forEach((x, j) => { t[k][j] += x; });
-            else t[k] += v;
-          }
-        }
-        params = r.params;
-      }
-      return { cohorts: total, symbolsUsed: used, symbolsRequested: uni.symbols.length, listed: uni.listed, params };
     },
 
     async fetchNews(symbol, { signal } = {}) {
