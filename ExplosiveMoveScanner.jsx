@@ -282,7 +282,12 @@ export default function ExplosiveMoveScanner() {
       const mp = Number(m.minPrice);
       const minPrice = Number.isFinite(mp) && m.minPrice !== '' ? mp : 1;
       let data;
-      if (m.list === 'lows') {
+      if (m.list === 'gainerlows') {
+        data = await provider.fetchGainerLows(
+          { withinDays: 30, top: 20, minPrice, hideDerivatives: m.hideDerivatives },
+          { onProgress: (progress) => setMovers((cur) => ({ ...cur, progress })) },
+        );
+      } else if (m.list === 'lows') {
         const rv = Number(m.minRvol);
         data = await provider.fetchLowRvol(
           { minRvol: Number.isFinite(rv) && m.minRvol !== '' ? rv : 2, withinDays: 30, top: 20, minPrice, hideDerivatives: m.hideDerivatives },
@@ -378,7 +383,7 @@ export default function ExplosiveMoveScanner() {
         <section className="space-y-3" aria-labelledby="movers-h">
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="movers-h" className="text-lg font-semibold mr-2 flex items-center gap-2"><Flame className="w-5 h-5 text-orange-400" />Today's top movers</h2>
-            {[['gainers', 'Top gainers'], ['actives', 'Most active'], ['lows', '200-day lows + RVOL']].map(([k, label]) => (
+            {[['gainers', 'Top gainers'], ['actives', 'Most active'], ['lows', '200-day lows + RVOL'], ['gainerlows', 'Gainers at 200-day lows']].map(([k, label]) => (
               <button key={k} type="button" aria-pressed={movers.list === k} onClick={() => loadMovers({ list: k })} className={`px-3 py-1 text-sm rounded-full border ${movers.list === k ? 'bg-blue-600 border-blue-500' : 'bg-slate-800 border-slate-600 hover:border-blue-500'}`}>{label}</button>
             ))}
             <button type="button" onClick={() => loadMovers()} disabled={movers.loading} className="px-3 py-1 text-sm rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50 flex items-center gap-1"><RefreshCw className={`w-3.5 h-3.5 ${movers.loading ? 'animate-spin' : ''}`} />{movers.data ? 'Refresh' : 'Fetch top 20'}</button>
@@ -404,7 +409,14 @@ export default function ExplosiveMoveScanner() {
                 : `Checked ${movers.data.stats.universe} active names · ${movers.data.stats.lowHits} set a 200-day low in the last 30 days · ${movers.data.stats.passed} also have RVOL of ${movers.data.filters.minRvol}x or more${movers.data.stats.capped ? ' (RVOL was measured on the 60 freshest lows only)' : ''}.`}
             </p>
           )}
-          {movers.data && !movers.data.items.length && !movers.loading && <p className="text-sm text-slate-400">{movers.data.list === 'lows' ? 'No stocks meet both tests right now. That is a normal result, not an error.' : 'No movers match these filters right now.'}</p>}
+          {movers.data?.list === 'gainerlows' && !movers.loading && (
+            <p className="text-xs text-slate-400">
+              {movers.data.demo
+                ? 'Demo mode: the 200-day-low check needs live data, so this just shows demo gainers.'
+                : `Checked the top ${movers.data.stats.gainers} gainers · ${movers.data.stats.lowHits} set a 200-day low in the last 30 days. Ranked by today's gain. These are already up, so you would be chasing; RVOL is shown for context only.`}
+            </p>
+          )}
+          {movers.data && !movers.data.items.length && !movers.loading && <p className="text-sm text-slate-400">{movers.data.list === 'gainerlows' ? 'None of the current top gainers set a 200-day low in the last 30 days. That is common and not an error.' : movers.data.list === 'lows' ? 'No stocks meet both tests right now. That is a normal result, not an error.' : 'No movers match these filters right now.'}</p>}
           {movers.data?.items?.length > 0 && (
             <>
               <ul className="flex flex-wrap gap-2" aria-label="Fetched movers">
