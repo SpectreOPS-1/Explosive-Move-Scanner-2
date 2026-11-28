@@ -79,9 +79,33 @@ export function createApiProvider({ baseUrl, accessCode }) {
       };
     },
 
+    /** Replays the last year of daily bars for a random sample of US stocks and counts outcomes after each setup. */
+    async fetchBacktest({ sample = 300 } = {}, { signal, onProgress } = {}) {
+      onProgress?.('Choosing a random sample of US-listed stocks…');
+      const uni = await get('/api/bt/universe', { n: sample }, signal);
+      const total = {};
+      let used = 0, params = null;
+      const chunk = 40;
+      for (let i = 0; i < uni.symbols.length; i += chunk) {
+        onProgress?.(`Replaying history… ${Math.min(i + chunk, uni.symbols.length)} of ${uni.symbols.length} stocks`);
+        const r = await get('/api/bt/run', { symbols: uni.symbols.slice(i, i + chunk).join(',') }, signal);
+        used += r.symbolsUsed;
+        for (const [name, c] of Object.entries(r.cohorts)) {
+          const t = total[name] || (total[name] = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, Array.isArray(v) ? new Array(v.length).fill(0) : 0])));
+          for (const [k, v] of Object.entries(c)) {
+            if (Array.isArray(v)) v.forEach((x, j) => { t[k][j] += x; });
+            else t[k] += v;
+          }
+        }
+        params = r.params;
+      }
+      return { cohorts: total, symbolsUsed: used, symbolsRequested: uni.symbols.length, listed: uni.listed, params };
+    },
+
     async fetchNews(symbol, { signal } = {}) {
       const d = await get('/api/news', { symbol }, signal);
       return d.items || [];
     },
   };
 }
+
